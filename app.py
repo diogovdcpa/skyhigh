@@ -21,6 +21,9 @@ def main() -> int:
     password = required_env("PASSWORD")
     tenant_id = required_env("TENANT_ID")
     environment = os.getenv("ENVIRONMENT", "na")
+    search_string = os.getenv("USER_SEARCH", "")
+    start_index = int(os.getenv("USER_START_INDEX", "0"))
+    num_records = int(os.getenv("USER_NUM_RECORDS", "2500"))
 
     client = WebClient(
         email=email,
@@ -29,8 +32,15 @@ def main() -> int:
         environment=environment,
     )
 
-    users_list = client.GetList(id="list_APIUsers")
-    print(json.dumps(users_list, indent=2, ensure_ascii=False))
+    users = client.SearchUsers(
+        searchString=search_string,
+        startIndex=start_index,
+        numRecords=num_records,
+        sortColumn="lastLoginDate",
+        sortAscending=False,
+        userRole=None,
+    )
+    print(json.dumps(users, indent=2, ensure_ascii=False))
     return 0
 
 

@@ -467,6 +467,74 @@ class WebClient(_baseClient):
         else:
             raise Exception('Failed to get policy backup with error: {}'.format(resp.text))
 
+    def SearchUsers(self, searchString='', startIndex=0, numRecords=2500, sortColumn='lastLoginDate', sortAscending=False, userRole=None, tenantId=None, **kwargs):
+        """
+        Searches users in Skyhigh CASB via `/shnapi/rest/v1/user/search`.
+
+        SearchUsers(searchString='', startIndex=0, numRecords=2500, sortColumn='lastLoginDate', sortAscending=False, userRole=None, tenantId=None)
+
+        Arguments:
+            searchString (str): Optional search text.
+            startIndex (int): Zero-based first index for pagination.
+            numRecords (int): Number of records to return.
+            sortColumn (str): Column used for sorting.
+            sortAscending (bool): Sort direction.
+            userRole (str or None): Optional user role filter.
+            tenantId (int, str, or None): Optional legacy tenant id. If None, uses authenticated tenant id.
+
+        Optional Keyword Arguments:
+            timeout = (int) Overrides default request timeout value set when WebClient object was initialized. (see https://docs.python-requests.org/en/latest/user/advanced/#timeouts)
+            proxies = (dict) Overrides proxy list set when WebClient object was initialized. (see https://docs.python-requests.org/en/latest/user/advanced/#proxies)
+            verify = (bool or str) Overrides SSL/TLS verification options set when WebClient object was initialized. (see https://docs.python-requests.org/en/latest/user/advanced/#ssl-cert-verification)
+        """
+        assert isinstance(searchString, str), 'Argument \'searchString\' must be of type str.'
+        assert isinstance(startIndex, int) and startIndex >= 0, 'Argument \'startIndex\' must be an int >= 0.'
+        assert isinstance(numRecords, int) and numRecords > 0, 'Argument \'numRecords\' must be an int > 0.'
+        assert isinstance(sortColumn, str) and sortColumn, 'Argument \'sortColumn\' must be a non-empty str.'
+        assert isinstance(sortAscending, bool), 'Argument \'sortAscending\' must be of type bool.'
+        if userRole is not None:
+            assert isinstance(userRole, str), 'Argument \'userRole\' must be of type str or None.'
+        if tenantId is not None:
+            assert isinstance(tenantId, (int, str)), 'Argument \'tenantId\' must be of type int, str, or None.'
+
+        scopes = ['web.usr.r']
+        auth = self._getAuthHeaders(scopes, **kwargs)
+        if tenantId is None:
+            tenantId = self._tenantId.get('legacyTenantId')
+        if tenantId is None:
+            raise Exception('Unable to resolve legacy tenant ID for user search.')
+
+        url = 'https://www.' + self._fabric['domain'] + '/shnapi/rest/v1/user/search'
+        payload = {
+            "pageCriteria": {
+                "startIndex": startIndex,
+                "numRecords": numRecords
+            },
+            "sortCriteria": {
+                "sortColumn": sortColumn,
+                "sortAscending": sortAscending
+            },
+            "searchString": searchString,
+            "tenantId": int(tenantId) if isinstance(tenantId, str) and tenantId.isdigit() else tenantId,
+            "userRole": userRole
+        }
+        headers = {
+            "Authorization": auth['authorization'],
+            "Content-Type": "application/json"
+        }
+
+        response = self._session.post(url,
+            headers=headers,
+            json=payload,
+            timeout=kwargs.get('timeout', self._timeout),
+            proxies=kwargs.get('proxies', self._proxies),
+            verify=kwargs.get('verify', self._verify))
+
+        if response.status_code == 200:
+            return json.loads(response.text)
+
+        raise Exception('Failed to search users with error: [{}] {}'.format(response.status_code, response.text))
+
 
     def GetList(self, id=None, name=None, **kwargs):
         """
@@ -708,4 +776,3 @@ class WebClient(_baseClient):
         }
 
         self._commit([change], scopes, **kwargs)
-
