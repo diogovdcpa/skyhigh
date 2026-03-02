@@ -14,6 +14,14 @@ def required_env(name: str) -> str:
     return value
 
 
+def choose_menu_option() -> str:
+    print("Selecione uma opcao:")
+    print("1) Pegar uma lista (list_APIUsers)")
+    print("2) Pegar todos usuarios")
+    print("0) Sair")
+    return input("> ").strip()
+
+
 def main() -> int:
     load_dotenv()
 
@@ -32,15 +40,34 @@ def main() -> int:
         environment=environment,
     )
 
-    users = client.SearchUsers(
-        searchString=search_string,
-        startIndex=start_index,
-        numRecords=num_records,
-        sortColumn="lastLoginDate",
-        sortAscending=False,
-        userRole=None,
-    )
-    print(json.dumps(users, indent=2, ensure_ascii=False))
+    option = choose_menu_option()
+
+    if option == "0":
+        print("Encerrado.")
+        return 0
+
+    if option == "1":
+        try:
+            result = client.GetList(id="list_APIUsers")
+        except Exception as exc:
+            raise RuntimeError(
+                "Falha ao buscar list_APIUsers. "
+                "Valide se a lista existe no tenant (GetListCollection)."
+            ) from exc
+    elif option == "2":
+        result = client.SearchUsers(
+            searchString=search_string,
+            startIndex=start_index,
+            numRecords=num_records,
+            sortColumn="lastLoginDate",
+            sortAscending=False,
+            userRole=None,
+        )
+    else:
+        print("Opcao invalida. Use 1, 2 ou 0.", file=sys.stderr)
+        return 1
+
+    print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
 
 
