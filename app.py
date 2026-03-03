@@ -14,19 +14,37 @@ def required_env(name: str) -> str:
     return value
 
 
+def print_banner():
+    print("========================================")
+    print("              Skyhigh API               ")
+    print("========================================")
+
+
 def choose_menu_option() -> str:
+    print_banner()
     print("Selecione uma opcao:")
-    print("1) Pegar uma lista (list_APIUsers)")
-    print("2) Pegar todos usuarios")
-    print("3) Listar todos os valores da lista (list_APIUsers)")
-    print("4) Adicionar novo item na lista (list_APIUsers)")
-    print("5) Apagar item da lista (list_APIUsers)")
-    print("6) Criar usuario")
+    print("")
+    print("Lista:")
+    print("1) Validar a lista (list_APIUsers)")
+    print("2) Listar valores da lista (list_APIUsers)")
+    print("3) Adicionar novo item na lista")
+    print("4) Deletar item da lista")
+    print("")
+    print("Usuario:")
+    print("5) Criar usuario")
+    print("6) Deletar usuario")
     print("7) Atualizar usuario")
-    print("8) Deletar usuario")
-    print("9) Consultar incidentes")
+    print("9) Listar todos usuarios")
+    print("")
+    print("Incidentes:")
+    print("8) Listar incidentes")
+    print("")
     print("0) Sair")
     return input("> ").strip()
+
+
+def clear_screen():
+    os.system("cls" if os.name == "nt" else "clear")
 
 
 def read_required_input(prompt: str) -> str:
@@ -270,30 +288,13 @@ def load_full_user_payload(client: WebClient, user_obj: dict, fallback_user_id: 
     return None
 
 
-def main() -> int:
-    load_dotenv()
-
-    email = required_env("EMAIL")
-    password = required_env("PASSWORD")
-    tenant_id = required_env("TENANT_ID")
-    environment = os.getenv("ENVIRONMENT", "na")
-    search_string = os.getenv("USER_SEARCH", "")
-    start_index = int(os.getenv("USER_START_INDEX", "0"))
-    num_records = int(os.getenv("USER_NUM_RECORDS", "2500"))
-
-    client = WebClient(
-        email=email,
-        password=password,
-        tenantId=tenant_id,
-        environment=environment,
-    )
-
-    option = choose_menu_option()
-
-    if option == "0":
-        print("Encerrado.")
-        return 0
-
+def execute_menu_option(
+    client: WebClient,
+    option: str,
+    search_string: str,
+    start_index: int,
+    num_records: int,
+):
     if option == "1":
         try:
             result = client.GetList(id="list_APIUsers")
@@ -303,15 +304,6 @@ def main() -> int:
                 "Valide se a lista existe no tenant (GetListCollection)."
             ) from exc
     elif option == "2":
-        result = client.SearchUsers(
-            searchString=search_string,
-            startIndex=start_index,
-            numRecords=num_records,
-            sortColumn="lastLoginDate",
-            sortAscending=False,
-            userRole=None,
-        )
-    elif option == "3":
         try:
             list_result = client.GetList(id="list_APIUsers")
         except Exception as exc:
@@ -320,11 +312,11 @@ def main() -> int:
                 "Valide se a lista existe no tenant (GetListCollection)."
             ) from exc
         result = [entry.get("value") for entry in list_result.get("entries", [])]
-    elif option == "4":
+    elif option == "3":
         value = input("Digite o valor do novo item: ").strip()
         if not value:
             print("Valor obrigatorio para adicionar item.", file=sys.stderr)
-            return 1
+            return None
         comment = input("Digite o comentario (opcional): ").strip()
         try:
             list_result = client.GetList(id="list_APIUsers")
@@ -344,7 +336,7 @@ def main() -> int:
             "entry": new_entry,
             "total_entries": len(entries),
         }
-    elif option == "5":
+    elif option == "4":
         try:
             list_result = client.GetList(id="list_APIUsers")
         except Exception as exc:
@@ -361,8 +353,7 @@ def main() -> int:
                 "message": "A lista esta vazia. Nenhum item para remover.",
                 "total_entries": 0,
             }
-            print(json.dumps(result, indent=2, ensure_ascii=False))
-            return 0
+            return result
 
         print("Itens atuais da lista:")
         for index, entry in enumerate(entries):
@@ -375,13 +366,13 @@ def main() -> int:
             selected_index = int(selected)
         except ValueError:
             print("Indice invalido. Informe um numero inteiro.", file=sys.stderr)
-            return 1
+            return None
         if selected_index < 0 or selected_index >= len(entries):
             print(
                 f"Indice invalido. Escolha entre 0 e {len(entries) - 1}.",
                 file=sys.stderr,
             )
-            return 1
+            return None
 
         removed_entry = entries.pop(selected_index)
         updated_list = dict(list_result)
@@ -393,7 +384,7 @@ def main() -> int:
             "removed_index": selected_index,
             "total_entries": len(entries),
         }
-    elif option == "6":
+    elif option == "5":
         user_email = read_required_input("Email/login do novo usuario: ")
         first_name = read_required_input("Primeiro nome (obrigatorio): ")
         last_name = read_required_input("Sobrenome (obrigatorio): ")
@@ -419,7 +410,7 @@ def main() -> int:
                     "Ja existe usuario com esse email. Use opcao 7 (atualizar) ou informe outro email.",
                     file=sys.stderr,
                 )
-                return 1
+                return None
         except Exception:
             pass
 
@@ -436,7 +427,7 @@ def main() -> int:
                     ),
                     file=sys.stderr,
                 )
-                return 1
+                return None
 
         active = read_optional_bool("Usuario ativo? [sim/nao] (opcional, padrao sim): ")
         admin = read_optional_bool("Usuario admin? [sim/nao] (opcional, padrao nao): ")
@@ -481,11 +472,11 @@ def main() -> int:
                 f"Detalhe: {exc}",
                 file=sys.stderr,
             )
-            return 1
+            return None
 
         if not users:
             print("Nenhum usuario encontrado para atualizacao.", file=sys.stderr)
-            return 1
+            return None
 
         print("Usuarios disponiveis para atualizacao:")
         for index, user in enumerate(users):
@@ -537,15 +528,15 @@ def main() -> int:
                 selected_index = int(selected)
             except ValueError:
                 print("Indice invalido. Informe um numero inteiro.", file=sys.stderr)
-                return 1
+                return None
             if selected_index < 0 or selected_index >= len(users):
                 print(f"Indice invalido. Escolha entre 0 e {len(users) - 1}.", file=sys.stderr)
-                return 1
+                return None
             selected_user = users[selected_index]
             user_id = str(selected_user.get("id") or "").strip()
             if not user_id:
                 print("Usuario selecionado sem id valido para atualizacao.", file=sys.stderr)
-                return 1
+                return None
             print("Informacoes do usuario alvo:")
             print(json.dumps(selected_user["raw"], indent=2, ensure_ascii=False))
             current_user_payload = selected_user["raw"]
@@ -559,15 +550,14 @@ def main() -> int:
 
         must_continue = input("Deseja continuar com a atualizacao? [sim/nao]: ").strip().lower()
         if must_continue not in {"s", "sim", "y", "yes"}:
-            print("Atualizacao cancelada.")
-            return 0
+            return {"message": "Atualizacao cancelada."}
 
         if not isinstance(current_user_payload, dict):
             print(
                 "Nao foi possivel carregar dados atuais do usuario para edicao com defaults.",
                 file=sys.stderr,
             )
-            return 1
+            return None
 
         current_email = current_user_payload.get("email") or current_user_payload.get("userEmail")
         current_first_name = current_user_payload.get("firstName")
@@ -611,8 +601,7 @@ def main() -> int:
         if not updates:
             if update_warnings:
                 print(update_warnings[0], file=sys.stderr)
-            print("Nenhuma alteracao detectada/aplicavel. Atualizacao cancelada.")
-            return 0
+            return {"message": "Nenhuma alteracao detectada/aplicavel. Atualizacao cancelada."}
 
         api_result = client.UpdateUser(user_id, updates, currentUser=current_user_payload)
         verification = {}
@@ -660,7 +649,7 @@ def main() -> int:
             "api_result": api_result,
             "verification": verification,
         }
-    elif option == "8":
+    elif option == "6":
         try:
             users = list_users_for_selection(client, max_records=200)
         except Exception as exc:
@@ -669,11 +658,11 @@ def main() -> int:
                 f"Detalhe: {exc}",
                 file=sys.stderr,
             )
-            return 1
+            return None
 
         if not users:
             print("Nenhum usuario encontrado para exclusao.", file=sys.stderr)
-            return 1
+            return None
 
         print("Usuarios disponiveis para exclusao:")
         for index, user in enumerate(users):
@@ -697,29 +686,28 @@ def main() -> int:
                 selected_index = int(selected)
             except ValueError:
                 print("Indice invalido. Informe um numero inteiro.", file=sys.stderr)
-                return 1
+                return None
             if selected_index < 0 or selected_index >= len(users):
                 print(f"Indice invalido. Escolha entre 0 e {len(users) - 1}.", file=sys.stderr)
-                return 1
+                return None
             selected_user = users[selected_index]
             print("Informacoes do usuario alvo:")
             print(json.dumps(selected_user["raw"], indent=2, ensure_ascii=False))
             delete_identifier = selected_user.get("email") or str(selected_user.get("id"))
             if not delete_identifier:
                 print("Usuario selecionado sem id/email valido para exclusao.", file=sys.stderr)
-                return 1
+                return None
 
         confirmation_text = input(
             f"Para confirmar, digite exatamente o identificador ({delete_identifier}): "
         ).strip()
         if confirmation_text != delete_identifier:
             print("Confirmacao invalida. Exclusao cancelada.", file=sys.stderr)
-            return 1
+            return None
 
         final_confirm = input("Confirma deletar este usuario? [sim/nao]: ").strip().lower()
         if final_confirm not in {"s", "sim", "y", "yes"}:
-            print("Exclusao cancelada.")
-            return 0
+            return {"message": "Exclusao cancelada."}
 
         api_result = client.DeleteUser(delete_identifier)
         result = {
@@ -729,7 +717,7 @@ def main() -> int:
             "selected_user_email": selected_user.get("email") if selected_user else None,
             "api_result": api_result,
         }
-    elif option == "9":
+    elif option == "8":
         limit_raw = input("Quantidade maxima de incidentes [50]: ").strip()
         days_raw = input("Periodo retroativo em dias [7]: ").strip()
         status_raw = input("Filtro de status (opcional): ").strip()
@@ -743,11 +731,11 @@ def main() -> int:
             days_back = int(days_raw) if days_raw else 7
         except ValueError:
             print("Valor invalido. Use numeros inteiros para limite e periodo.", file=sys.stderr)
-            return 1
+            return None
 
         if limit <= 0 or days_back <= 0:
             print("Valor invalido. Limite e periodo devem ser maiores que zero.", file=sys.stderr)
-            return 1
+            return None
 
         incidents = client.SearchIncidents(
             limit=limit,
@@ -767,11 +755,72 @@ def main() -> int:
             },
             "api_result": incidents,
         }
+    elif option == "9":
+        result = client.SearchUsers(
+            searchString=search_string,
+            startIndex=start_index,
+            numRecords=num_records,
+            sortColumn="lastLoginDate",
+            sortAscending=False,
+            userRole=None,
+        )
     else:
         print("Opcao invalida. Use 1, 2, 3, 4, 5, 6, 7, 8, 9 ou 0.", file=sys.stderr)
-        return 1
+        return None
 
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return result
+
+
+def main() -> int:
+    load_dotenv()
+
+    email = required_env("EMAIL")
+    password = required_env("PASSWORD")
+    tenant_id = required_env("TENANT_ID")
+    environment = os.getenv("ENVIRONMENT", "na")
+    search_string = os.getenv("USER_SEARCH", "")
+    start_index = int(os.getenv("USER_START_INDEX", "0"))
+    num_records = int(os.getenv("USER_NUM_RECORDS", "2500"))
+
+    client = WebClient(
+        email=email,
+        password=password,
+        tenantId=tenant_id,
+        environment=environment,
+    )
+
+    valid_options = {str(i) for i in range(10)}
+
+    while True:
+        option = choose_menu_option()
+        if option not in valid_options:
+            print("Opcao invalida. Use 1, 2, 3, 4, 5, 6, 7, 8, 9 ou 0.", file=sys.stderr)
+            input("Pressione ENTER para tentar novamente...")
+            clear_screen()
+            continue
+
+        clear_screen()
+
+        if option == "0":
+            print_banner()
+            print("Encerrado.")
+            return 0
+
+        print_banner()
+        result = execute_menu_option(
+            client=client,
+            option=option,
+            search_string=search_string,
+            start_index=start_index,
+            num_records=num_records,
+        )
+
+        if result is not None:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+
+        input("Pressione ENTER para voltar ao menu...")
+        clear_screen()
+
     return 0
 
 
