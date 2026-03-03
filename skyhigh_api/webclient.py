@@ -755,7 +755,15 @@ class WebClient(_baseClient):
                 raise Exception('Parameters must include either \'listObject\' or \'id\' to identify the list to be updated.')
             if not (entries or comment or name):
                 raise Exception('Parameters must include either \'listObject\' or one of the following to make changes to the list: \'entries\', \'name\', \'comment\'')
-            updatedList = self.GetList(id=id)
+            listResp = self.GetList(id=id, fullObject=True)
+            if 'object' in listResp.keys():
+                updatedList = listResp['object']
+                if 'etag' in listResp.keys():
+                    updatedList['etag'] = listResp['etag']
+            else:
+                updatedList = listResp
+            if not 'etag' in updatedList.keys():
+                raise Exception('Failed to retrieve list etag for id \'' + id + '\'.')
         
         for x in [(name, 'name'), (entries, 'entries'), (comment, 'comment')]:
             if x[0]:

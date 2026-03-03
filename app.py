@@ -19,6 +19,7 @@ def choose_menu_option() -> str:
     print("1) Pegar uma lista (list_APIUsers)")
     print("2) Pegar todos usuarios")
     print("3) Listar todos os valores da lista (list_APIUsers)")
+    print("4) Adicionar novo item na lista (list_APIUsers)")
     print("0) Sair")
     return input("> ").strip()
 
@@ -73,8 +74,32 @@ def main() -> int:
                 "Valide se a lista existe no tenant (GetListCollection)."
             ) from exc
         result = [entry.get("value") for entry in list_result.get("entries", [])]
+    elif option == "4":
+        value = input("Digite o valor do novo item: ").strip()
+        if not value:
+            print("Valor obrigatorio para adicionar item.", file=sys.stderr)
+            return 1
+        comment = input("Digite o comentario (opcional): ").strip()
+        try:
+            list_result = client.GetList(id="list_APIUsers")
+        except Exception as exc:
+            raise RuntimeError(
+                "Falha ao buscar list_APIUsers. "
+                "Valide se a lista existe no tenant (GetListCollection)."
+            ) from exc
+        entries = list_result.get("entries", [])
+        if not isinstance(entries, list):
+            raise RuntimeError("Formato invalido: 'entries' nao e uma lista.")
+        new_entry = {"value": value, "comment": comment}
+        entries.append(new_entry)
+        client.UpdateList(id="list_APIUsers", entries=entries)
+        result = {
+            "message": "Item adicionado com sucesso.",
+            "entry": new_entry,
+            "total_entries": len(entries),
+        }
     else:
-        print("Opcao invalida. Use 1, 2, 3 ou 0.", file=sys.stderr)
+        print("Opcao invalida. Use 1, 2, 3, 4 ou 0.", file=sys.stderr)
         return 1
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
