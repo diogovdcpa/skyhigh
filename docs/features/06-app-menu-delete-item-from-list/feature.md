@@ -39,10 +39,11 @@ Antes da remocao, o fluxo deve listar os itens atuais e aguardar a escolha do it
    - Sem novas dependencias.
 
 ## Critérios de aceitação
-- [ ] O menu apresenta a nova opcao `5` para apagar item da lista.
-- [ ] Ao escolher a opcao `5`, o sistema lista os itens atuais antes de pedir a exclusao.
-- [ ] O sistema aguarda a selecao do item a ser deletado e valida indice invalido.
-- [ ] O item selecionado e removido via `GetList` + `UpdateList`.
+- [x] O menu apresenta a nova opcao `5` para apagar item da lista.
+- [x] Ao escolher a opcao `5`, o sistema lista os itens atuais antes de pedir a exclusao.
+- [x] O sistema aguarda a selecao do item a ser deletado e valida indice invalido.
+- [x] Se a lista estiver vazia, o fluxo encerra com mensagem informativa sem chamar `UpdateList`.
+- [x] O item selecionado e removido e a atualizacao funciona inclusive quando a lista passa a ficar vazia.
 
 ## Como executar/testar
 ```bash
