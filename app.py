@@ -18,6 +18,7 @@ def choose_menu_option() -> str:
     print("Selecione uma opcao:")
     print("1) Pegar uma lista (list_APIUsers)")
     print("2) Pegar todos usuarios")
+    print("3) Listar todos os valores da lista (list_APIUsers)")
     print("0) Sair")
     return input("> ").strip()
 
@@ -63,8 +64,17 @@ def main() -> int:
             sortAscending=False,
             userRole=None,
         )
+    elif option == "3":
+        try:
+            list_result = client.GetList(id="list_APIUsers")
+        except Exception as exc:
+            raise RuntimeError(
+                "Falha ao buscar list_APIUsers. "
+                "Valide se a lista existe no tenant (GetListCollection)."
+            ) from exc
+        result = [entry.get("value") for entry in list_result.get("entries", [])]
     else:
-        print("Opcao invalida. Use 1, 2 ou 0.", file=sys.stderr)
+        print("Opcao invalida. Use 1, 2, 3 ou 0.", file=sys.stderr)
         return 1
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
