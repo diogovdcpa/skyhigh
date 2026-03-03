@@ -535,6 +535,257 @@ class WebClient(_baseClient):
 
         raise Exception('Failed to search users with error: [{}] {}'.format(response.status_code, response.text))
 
+    def _request_user_write(self, method, path, payload=None, params=None, scopes=None, **kwargs):
+        if scopes is None:
+            scopes = ['web.usr.x']
+
+        auth = self._getAuthHeaders(scopes, **kwargs)
+        url = 'https://www.' + self._fabric['domain'] + path
+        headers = {
+            "Authorization": auth['authorization'],
+        }
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+
+        response = self._session.request(method,
+            url,
+            headers=headers,
+            json=payload,
+            params=params,
+            timeout=kwargs.get('timeout', self._timeout),
+            proxies=kwargs.get('proxies', self._proxies),
+            verify=kwargs.get('verify', self._verify))
+
+        return response
+
+    def _parse_response_body(self, response):
+        if not response.text:
+            return {"status_code": response.status_code}
+
+        try:
+            return json.loads(response.text)
+        except Exception:
+            return {"status_code": response.status_code, "raw": response.text}
+
+    def _resolve_user_tenant_id(self):
+        tenantId = self._tenantId.get('legacyTenantId')
+        if tenantId is None:
+            return None
+        if isinstance(tenantId, str):
+            if tenantId.isdigit():
+                return int(tenantId)
+            return None
+        if isinstance(tenantId, int):
+            return tenantId
+        return None
+
+    def _is_endpoint_missing(self, status_code):
+        return status_code in [404, 405]
+
+    def _build_user_payload_defaults(self, payload):
+        result = dict(payload)
+        tenantId = self._resolve_user_tenant_id()
+        defaults = {
+            "firstName": "",
+            "lastName": "",
+            "email": "",
+            "active": True,
+            "admin": False,
+            "id": -1,
+            "roles": [],
+            "shadowJurisdictionId": -1,
+            "sanctionedJurisdictionId": -1,
+            "webJurisdictionId": -1,
+            "readOnly": False,
+            "lastLoginDate": None,
+            "correlationId": None,
+            "samlExcludedUser": False,
+            "resendActivationLink": False,
+            "selfActivationDate": None,
+            "primaryUser": False,
+        }
+        if tenantId is not None:
+            defaults["tenantId"] = tenantId
+        for key, value in defaults.items():
+            result.setdefault(key, value)
+        return result
+
+    def _normalize_user_payload_for_write(self, payload):
+        """
+        Normalizes user payload fields to match common API expectations for write operations.
+        """
+        normalized = dict(payload)
+
+        # Jurisdiction fields are expected as -1 when not assigned.
+        for key in ["shadowJurisdictionId", "sanctionedJurisdictionId", "webJurisdictionId"]:
+            if normalized.get(key) is None:
+                normalized[key] = -1
+
+        # Common nullable booleans should be explicit for write payloads.
+        for key, default in [
+            ("active", True),
+            ("admin", False),
+            ("readOnly", False),
+            ("samlExcludedUser", False),
+            ("resendActivationLink", False),
+            ("primaryUser", False),
+        ]:
+            if normalized.get(key) is None:
+                normalized[key] = default
+
+        # Keep API-friendly list types.
+        roles = normalized.get("roles")
+        if roles is None:
+            normalized["roles"] = []
+        elif not isinstance(roles, list):
+            normalized["roles"] = list(roles)
+
+        return normalized
+
+    def GetUser(self, userId, **kwargs):
+        """
+        Gets a CASB user via `GET /shnapi/rest/v1/user?userId=<id>`.
+
+        GetUser(userId)
+        """
+        if not isinstance(userId, str) or not userId.strip():
+            raise Exception('Argument \'userId\' must be a non-empty string.')
+
+        cleanUserId = userId.strip()
+        candidates = [
+            {"userId": cleanUserId},
+            {"id": cleanUserId},
+        ]
+        errors = []
+        for params in candidates:
+            resp = self._request_user_write(
+                'GET',
+                '/shnapi/rest/v1/user',
+                params=params,
+                scopes=['web.usr.r'],
+                **kwargs,
+            )
+            if 200 <= resp.status_code < 300:
+                return self._parse_response_body(resp)
+            errors.append('[params={}] [{}] {}'.format(params, resp.status_code, resp.text))
+        raise Exception('Failed to get user. Tried: {}'.format(' | '.join(errors)))
+
+    def CreateUser(self, user, **kwargs):
+        """
+        Creates a CASB user via known `/shnapi/rest/v1/user/*` write endpoints.
+
+        CreateUser(user)
+
+        Arguments:
+            user (dict): User payload to be sent to API. Must include at least an email/login field.
+        """
+        if not isinstance(user, dict):
+            raise Exception('Argument \'user\' must be of type dict.')
+
+        email = user.get('email') or user.get('userEmail') or user.get('login')
+        if not isinstance(email, str) or not email.strip():
+            raise Exception('CreateUser requires a non-empty email/login in payload.')
+        roles = user.get('roles')
+        if not isinstance(roles, list) or not roles:
+            raise Exception('CreateUser requires at least one role ID in payload field \'roles\'.')
+
+        payload = self._build_user_payload_defaults(user)
+        payload["id"] = -1
+        payload = self._normalize_user_payload_for_write(payload)
+
+        resp = self._request_user_write('POST', '/shnapi/rest/v1/user', payload=payload, **kwargs)
+        if 200 <= resp.status_code < 300:
+            return self._parse_response_body(resp)
+        if resp.status_code == 422:
+            raise Exception(
+                'Failed to create user with error: [422] {}. '
+                'Valide campos obrigatorios (principalmente \'roles\') e combinacoes de RBAC.'.format(resp.text)
+            )
+        raise Exception('Failed to create user with error: [{}] {}'.format(resp.status_code, resp.text))
+
+    def UpdateUser(self, userId, updates, currentUser=None, **kwargs):
+        """
+        Updates a CASB user via known `/shnapi/rest/v1/user/*` write endpoints.
+
+        UpdateUser(userId, updates)
+
+        Arguments:
+            userId (str): User ID to update.
+            updates (dict): Partial or full user update payload.
+        """
+        if not isinstance(userId, str) or not userId.strip():
+            raise Exception('Argument \'userId\' must be a non-empty string.')
+        if not isinstance(updates, dict) or not updates:
+            raise Exception('Argument \'updates\' must be a non-empty dict.')
+
+        if currentUser is not None:
+            if not isinstance(currentUser, dict):
+                raise Exception('Argument \'currentUser\' must be of type dict when provided.')
+            current_user = dict(currentUser)
+        else:
+            current_user = self.GetUser(userId.strip(), **kwargs)
+        if not isinstance(current_user, dict):
+            raise Exception('Failed to update user: invalid response from GetUser.')
+        payload = self._build_user_payload_defaults(current_user)
+        payload.update(updates)
+        resolved_id = current_user.get("id", current_user.get("userId", current_user.get("userid", userId.strip())))
+        if isinstance(resolved_id, str) and resolved_id.isdigit():
+            resolved_id = int(resolved_id)
+        payload["id"] = resolved_id
+        payload = self._normalize_user_payload_for_write(payload)
+
+        resp = self._request_user_write('PUT', '/shnapi/rest/v1/user', payload=payload, **kwargs)
+        if 200 <= resp.status_code < 300:
+            return self._parse_response_body(resp)
+        raise Exception('Failed to update user with error: [{}] {}'.format(resp.status_code, resp.text))
+
+    def DeleteUser(self, userId, **kwargs):
+        """
+        Deletes a CASB user via known `/shnapi/rest/v1/user/*` write endpoints.
+
+        DeleteUser(userId)
+
+        Arguments:
+            userId (str): User ID to delete.
+        """
+        if not isinstance(userId, str) or not userId.strip():
+            raise Exception('Argument \'userId\' must be a non-empty string.')
+        cleanUserId = userId.strip()
+        candidates = [
+            {"userId": cleanUserId},
+            {"id": cleanUserId},
+        ]
+
+        # Em alguns tenants o endpoint aceita email no parametro userId.
+        # Se vier erro 500 com id numerico, tenta resolver o email e repetir.
+        if cleanUserId.isdigit():
+            try:
+                user_obj = self.GetUser(cleanUserId, **kwargs)
+                if isinstance(user_obj, dict):
+                    email = user_obj.get("email") or user_obj.get("userEmail")
+                    if isinstance(email, str) and email.strip():
+                        candidates.extend([{"userId": email.strip()}, {"id": email.strip()}])
+            except Exception:
+                pass
+
+        errors = []
+        attempted = set()
+        for params in candidates:
+            key = json.dumps(params, sort_keys=True)
+            if key in attempted:
+                continue
+            attempted.add(key)
+            resp = self._request_user_write(
+                'DELETE',
+                '/shnapi/rest/v1/user',
+                params=params,
+                **kwargs,
+            )
+            if 200 <= resp.status_code < 300:
+                return self._parse_response_body(resp)
+            errors.append('[params={}] [{}] {}'.format(params, resp.status_code, resp.text))
+        raise Exception('Failed to delete user. Tried: {}'.format(' | '.join(errors)))
+
 
     def GetList(self, id=None, name=None, **kwargs):
         """
