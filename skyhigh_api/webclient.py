@@ -2,7 +2,7 @@ from skyhigh_api._baseclient import _baseClient, allScopes, fabrics
 import json
 import requests
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from warnings import warn
 from skyhigh_api.validation import schemas
 
@@ -534,6 +534,249 @@ class WebClient(_baseClient):
             return json.loads(response.text)
 
         raise Exception('Failed to search users with error: [{}] {}'.format(response.status_code, response.text))
+
+    def SearchIncidents(self, limit=50, days_back=7, status=None, severity=None, endpoint=None,
+                        start_time=None, end_time=None, actor_ids=None, service_names=None,
+                        incident_criteria=None, **kwargs):
+        """
+        Searches incidents using common Skyhigh/XDR incident endpoints.
+
+        SearchIncidents(limit=50, days_back=7, status=None, severity=None)
+
+        Arguments:
+            limit (int): Max number of incidents to return.
+            days_back (int): Time window in days counting backwards from now (UTC).
+            status (str or None): Optional status filter.
+            severity (str or None): Optional severity filter.
+            endpoint (str or None): Optional endpoint override (e.g. /shnapi/rest/v1/incidents/search).
+            start_time (str or None): Optional explicit start time for queryIncidents payload.
+            end_time (str or None): Optional explicit end time for queryIncidents payload.
+            actor_ids (list or None): Optional actor IDs for queryIncidents payload.
+            service_names (list or None): Optional service names for queryIncidents payload.
+            incident_criteria (dict/list/None): Optional incident criteria payload.
+        """
+        assert isinstance(limit, int) and limit > 0, 'Argument \'limit\' must be an int > 0.'
+        assert isinstance(days_back, int) and days_back > 0, 'Argument \'days_back\' must be an int > 0.'
+        if status is not None:
+            assert isinstance(status, str), 'Argument \'status\' must be of type str or None.'
+        if severity is not None:
+            assert isinstance(severity, str), 'Argument \'severity\' must be of type str or None.'
+        if endpoint is not None:
+            assert isinstance(endpoint, str), 'Argument \'endpoint\' must be of type str or None.'
+        if start_time is not None:
+            assert isinstance(start_time, str), 'Argument \'start_time\' must be of type str or None.'
+        if end_time is not None:
+            assert isinstance(end_time, str), 'Argument \'end_time\' must be of type str or None.'
+        if actor_ids is not None:
+            assert isinstance(actor_ids, list), 'Argument \'actor_ids\' must be of type list or None.'
+        if service_names is not None:
+            assert isinstance(service_names, list), 'Argument \'service_names\' must be of type list or None.'
+        if incident_criteria is not None:
+            assert isinstance(incident_criteria, (dict, list)), 'Argument \'incident_criteria\' must be dict/list/None.'
+
+        now_utc = datetime.utcnow()
+        start_utc = now_utc - timedelta(days=days_back)
+        resolved_start = start_time or start_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+        resolved_end = end_time or now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+        params = {
+            "limit": limit,
+            "from": resolved_start,
+            "to": resolved_end,
+        }
+        if status and status.strip():
+            params["status"] = status.strip()
+        if severity and severity.strip():
+            params["severity"] = severity.strip()
+
+        endpoint_candidates = []
+        if endpoint and endpoint.strip():
+            endpoint_candidates.append(endpoint.strip())
+        endpoint_candidates.extend([
+            '/xdr/incidents',
+            '/xdrapi/incidents',
+            '/xdrapi/rest/v1/incidents',
+            '/xdrapi/rest/v1/incidents/search',
+            '/shnapi/rest/v1/incidents',
+            '/shnapi/rest/v1/incidents/search',
+            '/shnapi/rest/v1/incident',
+            '/soc/api/v1/incidents',
+            '/soc/api/v1/incidents/search',
+            '/soc/api/v1/events',
+            '/soc/api/v1/events/search',
+        ])
+        endpoints = []
+        seen_paths = set()
+        for candidate in endpoint_candidates:
+            clean = candidate.strip()
+            if not clean:
+                continue
+            clean = clean if clean.startswith('/') else '/' + clean
+            if clean in seen_paths:
+                continue
+            seen_paths.add(clean)
+            endpoints.append(clean)
+        scope_candidates = [
+            ['xdr.inc.w'],
+            ['soc.evt.vi'],
+            ['web.rpt.r'],
+        ]
+
+        search_payload = {
+            "limit": limit,
+            "status": status.strip() if isinstance(status, str) and status.strip() else None,
+            "severity": severity.strip() if isinstance(severity, str) and severity.strip() else None,
+            "timeRange": {
+                "from": params["from"],
+                "to": params["to"],
+            },
+            "pageCriteria": {
+                "startIndex": 0,
+                "numRecords": limit,
+            },
+            "searchString": "",
+        }
+        errors = []
+        only_not_found = True
+
+        external_payload = {
+            "startTime": resolved_start,
+            "endTime": resolved_end,
+        }
+        if actor_ids:
+            external_payload["actorIds"] = actor_ids
+        if service_names:
+            external_payload["serviceNames"] = service_names
+        if incident_criteria is not None:
+            external_payload["incidentCriteria"] = incident_criteria
+        elif status or severity:
+            external_payload["incidentCriteria"] = {
+                "status": status.strip() if isinstance(status, str) and status.strip() else None,
+                "severity": severity.strip() if isinstance(severity, str) and severity.strip() else None,
+            }
+
+        external_url = (
+            'https://www.' + self._fabric['domain'] +
+            '/shnapi/rest/external/api/v1/queryIncidents'
+        )
+        external_query_params = {"limit": limit}
+
+        # Prioridade: endpoint queryIncidents usado em outros projetos.
+        try:
+            auth = self._getAuthHeaders(['shn.con.r'], **kwargs)
+            bearer_headers = {
+                "Authorization": auth['authorization'],
+                "Content-Type": "application/json",
+            }
+            response = self._session.post(
+                external_url,
+                headers=bearer_headers,
+                params=external_query_params,
+                json=external_payload,
+                timeout=kwargs.get('timeout', self._timeout),
+                proxies=kwargs.get('proxies', self._proxies),
+                verify=kwargs.get('verify', self._verify))
+            if 200 <= response.status_code < 300:
+                try:
+                    return json.loads(response.text)
+                except Exception:
+                    return {"items": [], "raw": response.text}
+            if response.status_code != 404:
+                only_not_found = False
+            body_preview = (response.text or '').replace('\n', ' ').strip()
+            if len(body_preview) > 180:
+                body_preview = body_preview[:180] + '...'
+            errors.append(
+                '[mode=external-bearer] [path=/shnapi/rest/external/api/v1/queryIncidents] '
+                '[{}] {}'.format(response.status_code, body_preview))
+        except Exception as exc:
+            only_not_found = False
+            errors.append('[mode=external-bearer] [request-error] {}'.format(exc))
+
+        try:
+            response = self._session.post(
+                external_url,
+                auth=(self._userName, self._password),
+                params=external_query_params,
+                json=external_payload,
+                timeout=kwargs.get('timeout', self._timeout),
+                proxies=kwargs.get('proxies', self._proxies),
+                verify=kwargs.get('verify', self._verify))
+            if 200 <= response.status_code < 300:
+                try:
+                    return json.loads(response.text)
+                except Exception:
+                    return {"items": [], "raw": response.text}
+            if response.status_code != 404:
+                only_not_found = False
+            body_preview = (response.text or '').replace('\n', ' ').strip()
+            if len(body_preview) > 180:
+                body_preview = body_preview[:180] + '...'
+            errors.append(
+                '[mode=external-basic] [path=/shnapi/rest/external/api/v1/queryIncidents] '
+                '[{}] {}'.format(response.status_code, body_preview))
+        except Exception as exc:
+            only_not_found = False
+            errors.append('[mode=external-basic] [request-error] {}'.format(exc))
+
+        for scopes in scope_candidates:
+            auth = self._getAuthHeaders(scopes, **kwargs)
+            headers = {"Authorization": auth['authorization']}
+
+            for path in endpoints:
+                for method, method_payload in [('GET', None), ('POST', search_payload)]:
+                    url = 'https://www.' + self._fabric['domain'] + path
+                    request_headers = dict(headers)
+                    if method_payload is not None:
+                        request_headers["Content-Type"] = "application/json"
+                    response = self._session.request(
+                        method,
+                        url,
+                        headers=request_headers,
+                        params=params if method == 'GET' else None,
+                        json=method_payload,
+                        timeout=kwargs.get('timeout', self._timeout),
+                        proxies=kwargs.get('proxies', self._proxies),
+                        verify=kwargs.get('verify', self._verify))
+
+                    if 200 <= response.status_code < 300:
+                        try:
+                            return json.loads(response.text)
+                        except Exception:
+                            return {
+                                "items": [],
+                                "raw": response.text,
+                            }
+
+                    if response.status_code != 404:
+                        only_not_found = False
+
+                    body_preview = (response.text or '').replace('\n', ' ').strip()
+                    if len(body_preview) > 180:
+                        body_preview = body_preview[:180] + '...'
+                    errors.append(
+                        '[scopes={}] [method={}] [path={}] [{}] {}'.format(
+                            scopes,
+                            method,
+                            path,
+                            response.status_code,
+                            body_preview))
+
+        max_attempts_in_output = 20
+        if only_not_found and errors:
+            return {
+                "items": [],
+                "warning": (
+                    "Nao foi encontrado endpoint de incidentes disponivel neste tenant/ambiente. "
+                    "Considere informar endpoint customizado via parametro endpoint."
+                ),
+                "attempts": errors[:max_attempts_in_output],
+                "omitted_attempts": max(0, len(errors) - max_attempts_in_output),
+            }
+        raise Exception(
+            'Failed to search incidents. Tried: {}'.format(
+                ' | '.join(errors[:max_attempts_in_output])
+            )
+        )
 
     def _request_user_write(self, method, path, payload=None, params=None, scopes=None, **kwargs):
         if scopes is None:

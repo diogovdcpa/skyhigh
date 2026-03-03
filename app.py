@@ -24,6 +24,7 @@ def choose_menu_option() -> str:
     print("6) Criar usuario")
     print("7) Atualizar usuario")
     print("8) Deletar usuario")
+    print("9) Consultar incidentes")
     print("0) Sair")
     return input("> ").strip()
 
@@ -728,8 +729,46 @@ def main() -> int:
             "selected_user_email": selected_user.get("email") if selected_user else None,
             "api_result": api_result,
         }
+    elif option == "9":
+        limit_raw = input("Quantidade maxima de incidentes [50]: ").strip()
+        days_raw = input("Periodo retroativo em dias [7]: ").strip()
+        status_raw = input("Filtro de status (opcional): ").strip()
+        severity_raw = input("Filtro de severidade (opcional): ").strip()
+        endpoint_raw = input(
+            "Endpoint customizado (opcional, ex: /shnapi/rest/v1/incidents/search): "
+        ).strip()
+
+        try:
+            limit = int(limit_raw) if limit_raw else 50
+            days_back = int(days_raw) if days_raw else 7
+        except ValueError:
+            print("Valor invalido. Use numeros inteiros para limite e periodo.", file=sys.stderr)
+            return 1
+
+        if limit <= 0 or days_back <= 0:
+            print("Valor invalido. Limite e periodo devem ser maiores que zero.", file=sys.stderr)
+            return 1
+
+        incidents = client.SearchIncidents(
+            limit=limit,
+            days_back=days_back,
+            status=status_raw or None,
+            severity=severity_raw or None,
+            endpoint=endpoint_raw or os.getenv("INCIDENTS_ENDPOINT") or None,
+        )
+        result = {
+            "message": "Consulta de incidentes executada.",
+            "filters": {
+                "limit": limit,
+                "days_back": days_back,
+                "status": status_raw or None,
+                "severity": severity_raw or None,
+                "endpoint": endpoint_raw or os.getenv("INCIDENTS_ENDPOINT") or None,
+            },
+            "api_result": incidents,
+        }
     else:
-        print("Opcao invalida. Use 1, 2, 3, 4, 5, 6, 7, 8 ou 0.", file=sys.stderr)
+        print("Opcao invalida. Use 1, 2, 3, 4, 5, 6, 7, 8, 9 ou 0.", file=sys.stderr)
         return 1
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
